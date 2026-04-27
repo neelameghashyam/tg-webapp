@@ -1,0 +1,190 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: TG Template Webapp - Cron Lambda Functions
+
+Parameters:
+  NamePrefix:
+    Type: String
+  Environment:
+    Type: String
+  ArtifactsBucket:
+    Type: String
+  VpcId:
+    Type: String
+  SubnetIds:
+    Type: String
+  SecurityGroupId:
+    Type: String
+  DBEndpoint:
+    Type: String
+  SendMail:
+    Type: String
+
+Resources:
+  # IAM Role for Cron Lambdas
+  CronLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${NamePrefix}-cron-role-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: SecretsAndSES
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:/tg-template/*
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                Resource: '*'
+
+  # TG Status Updater - runs at 4:00 AM UTC
+  TgStatusUpdaterLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${NamePrefix}-tg-status-updater-${Environment}
+      Runtime: nodejs20.x
+      Handler: src/handlers/tg-status-updater.handler
+      Role: !GetAtt CronLambdaRole.Arn
+      Code:
+        S3Bucket: !Ref ArtifactsBucket
+        S3Key: artifacts/cron.zip
+      Timeout: 300
+      MemorySize: 256
+      VpcConfig:
+        SubnetIds: !Split [',', !Ref SubnetIds]
+        SecurityGroupIds:
+          - !Ref SecurityGroupId
+      Environment:
+        Variables:
+          DB_HOST: !Ref DBEndpoint
+          DB_PORT: '3306'
+          DB_NAME: upovtg
+          DB_USER: !Sub '{{resolve:secretsmanager:/tg-template/rds/credentials/master:SecretString:username}}'
+          DB_PASSWORD: !Sub '{{resolve:secretsmanager:/tg-template/rds/credentials/master:SecretString:password}}'
+
+  TgStatusUpdaterSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${NamePrefix}-tg-status-updater-schedule-${Environment}
+      ScheduleExpression: cron(0 4 * * ? *)
+      State: ENABLED
+      Targets:
+        - Id: TgStatusUpdater
+          Arn: !GetAtt TgStatusUpdaterLambda.Arn
+
+  TgStatusUpdaterPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref TgStatusUpdaterLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt TgStatusUpdaterSchedule.Arn
+
+  # IE Status Updater - runs at 4:05 AM UTC
+  IeStatusUpdaterLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${NamePrefix}-ie-status-updater-${Environment}
+      Runtime: nodejs20.x
+      Handler: src/handlers/ie-status-updater.handler
+      Role: !GetAtt CronLambdaRole.Arn
+      Code:
+        S3Bucket: !Ref ArtifactsBucket
+        S3Key: artifacts/cron.zip
+      Timeout: 300
+      MemorySize: 256
+      VpcConfig:
+        SubnetIds: !Split [',', !Ref SubnetIds]
+        SecurityGroupIds:
+          - !Ref SecurityGroupId
+      Environment:
+        Variables:
+          DB_HOST: !Ref DBEndpoint
+          DB_PORT: '3306'
+          DB_NAME: upovtg
+          DB_USER: !Sub '{{resolve:secretsmanager:/tg-template/rds/credentials/master:SecretString:username}}'
+          DB_PASSWORD: !Sub '{{resolve:secretsmanager:/tg-template/rds/credentials/master:SecretString:password}}'
+
+  IeStatusUpdaterSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${NamePrefix}-ie-status-updater-schedule-${Environment}
+      ScheduleExpression: cron(5 4 * * ? *)
+      State: ENABLED
+      Targets:
+        - Id: IeStatusUpdater
+          Arn: !GetAtt IeStatusUpdaterLambda.Arn
+
+  IeStatusUpdaterPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref IeStatusUpdaterLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt IeStatusUpdaterSchedule.Arn
+
+  # Deadline Reminder - runs at 4:10 AM UTC
+  DeadlineReminderLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${NamePrefix}-deadline-reminder-${Environment}
+      Runtime: nodejs20.x
+      Handler: src/handlers/deadline-reminder.handler
+      Role: !GetAtt CronLambdaRole.Arn
+      Code:
+        S3Bucket: !Ref ArtifactsBucket
+        S3Key: artifacts/cron.zip
+      Timeout: 300
+      MemorySize: 256
+      VpcConfig:
+        SubnetIds: !Split [',', !Ref SubnetIds]
+        SecurityGroupIds:
+          - !Ref SecurityGroupId
+      Environment:
+        Variables:
+          DB_HOST: !Ref DBEndpoint
+          DB_PORT: '3306'
+          DB_NAME: upovtg
+          DB_USER: !Sub '{{resolve:secretsmanager:/tg-template/rds/credentials/master:SecretString:username}}'
+          DB_PASSWORD: !Sub '{{resolve:secretsmanager:/tg-template/rds/credentials/master:SecretString:password}}'
+          SEND_MAIL: !Ref SendMail
+          MAIL_FROM_ID: noreply@upov.int
+
+  DeadlineReminderSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${NamePrefix}-deadline-reminder-schedule-${Environment}
+      ScheduleExpression: cron(10 4 * * ? *)
+      State: ENABLED
+      Targets:
+        - Id: DeadlineReminder
+          Arn: !GetAtt DeadlineReminderLambda.Arn
+
+  DeadlineReminderPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DeadlineReminderLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt DeadlineReminderSchedule.Arn
+
+Outputs:
+  TgStatusUpdaterLambdaArn:
+    Value: !GetAtt TgStatusUpdaterLambda.Arn
+  IeStatusUpdaterLambdaArn:
+    Value: !GetAtt IeStatusUpdaterLambda.Arn
+  DeadlineReminderLambdaArn:
+    Value: !GetAtt DeadlineReminderLambda.Arn

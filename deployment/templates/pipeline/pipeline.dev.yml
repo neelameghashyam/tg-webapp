@@ -1,0 +1,348 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >
+  Creates the pipeline for the UPOV TG Template Webapp deployment
+
+Parameters:
+  NamePrefix:
+    Description: Prefix added to the name of resources created in this stack
+    Type: String
+    Default: upov-tg-template-webapp
+
+  CicdAccount:
+    Description: The id of the cicd account
+    Type: String
+    Default: "173148697964"
+
+  AppId:
+    Type: String
+    Description: Application ID for the WIPO Business Application
+    Default: app-0304
+
+Resources:
+
+  BuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${NamePrefix}-build-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+
+  BuildProjectPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${NamePrefix}-build-policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:PutObject*
+              - s3:DeleteObject
+              - s3:GetObject*
+              - s3:ListBucket
+            Resource:
+              - !Sub arn:aws:s3:::${NamePrefix}-artifacts-eu-central-1-521352391231
+              - !Sub arn:aws:s3:::${NamePrefix}-artifacts-eu-central-1-521352391231/*
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:*
+      Roles:
+        - !Ref BuildRole
+
+  BuildProject:
+    Type: AWS::CodeBuild::Project
+    DependsOn: BuildProjectPolicy
+    Properties:
+      Name: !Sub ${NamePrefix}-build
+      ServiceRole: !GetAtt BuildRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        EnvironmentVariables:
+          - Name: PREFIX
+            Value: !Ref NamePrefix
+          - Name: ARTIFACTS_ACCOUNT
+            Value: !Ref AWS::AccountId
+          - Name: APP_ID
+            Value: !Ref AppId
+        PrivilegedMode: false
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              runtime-versions:
+                nodejs: 20
+            pre_build:
+              commands:
+                - echo Retrieving information from artifacts...
+                - DATE=$(date '+%y-%m-%d')
+                - ls -al $CODEBUILD_SRC_DIR
+                - SHORT_SOURCE_VERSION=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | head -c 8)
+                - BUILD_ID=$DATE.$SHORT_SOURCE_VERSION
+                - ARTIFACTS_BUCKET=${PREFIX}-artifacts-${AWS_REGION}-${ARTIFACTS_ACCOUNT}
+            build:
+              commands:
+                - echo "=== Building frontend ==="
+                - cd frontend
+                - npm ci
+                - npm run build
+                - cd ..
+                - echo "=== Packaging backend ==="
+                - cd backend
+                - npm ci --omit=dev
+                - zip -r $CODEBUILD_SRC_DIR/backend.zip src/ node_modules/ package.json -x "*.test.js" -x "src/serve.js"
+                - cd ..
+                - echo "=== Packaging cron ==="
+                - cd cron
+                - npm ci --omit=dev
+                - zip -r $CODEBUILD_SRC_DIR/cron.zip src/ node_modules/ package.json -x "*.test.js"
+                - cd ..
+                - echo "=== Uploading artifacts to S3 ==="
+                - aws s3 cp backend.zip s3://$ARTIFACTS_BUCKET/artifacts/backend.zip
+                - aws s3 cp cron.zip s3://$ARTIFACTS_BUCKET/artifacts/cron.zip
+                - aws s3 sync deployment/artifacts/frontend/ s3://$ARTIFACTS_BUCKET/artifacts/frontend/
+                - aws s3 cp --recursive templates/ s3://$ARTIFACTS_BUCKET/templates/
+                - echo "=== Building parameters file ==="
+                - |
+                  jq -n \
+                    --arg appId "$APP_ID" \
+                    --arg service "$PREFIX" \
+                    --arg bucket "$ARTIFACTS_BUCKET" \
+                    --slurpfile params templates/pipeline/parameters-dev.json \
+                    '{
+                      "Parameters": ($params[0].Parameters + {
+                        "ArtifactsBucket": $bucket
+                      }),
+                      "Tags": {
+                        "app-id": $appId,
+                        "service": $service
+                      }
+                    }' > templates/iac/master-parameters.json
+                - cat templates/iac/master-parameters.json
+          artifacts:
+            files:
+              - templates/iac/master.yml
+              - templates/iac/master-parameters.json
+
+      TimeoutInMinutes: 15
+      LogsConfig:
+        CloudWatchLogs:
+          GroupName: !Ref BuildLogGroup
+          Status: ENABLED
+
+  BuildLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub ${NamePrefix}/build
+      RetentionInDays: 7
+
+  PipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${NamePrefix}-pipeline-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+
+  PipelinePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${NamePrefix}-codepipeline-policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: '*'
+            Condition:
+              StringEqualsIfExists:
+                iam:PassedToService:
+                  - cloudformation.amazonaws.com
+          - Effect: Allow
+            Action:
+              - s3:*
+              - cloudformation:*
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - codebuild:BatchGetBuilds
+              - codebuild:StartBuild
+            Resource: '*'
+      Roles:
+        - !Ref PipelineRole
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      RoleArn: !GetAtt PipelineRole.Arn
+      Name: !Sub ${NamePrefix}-pipeline-dev
+      ArtifactStore:
+        Type: S3
+        Location: !Sub ${NamePrefix}-artifacts-eu-central-1-521352391231
+      Stages:
+        - Name: Sources
+          Actions:
+            - Name: S3SourceTemplates
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: '1'
+                Provider: S3
+              Configuration:
+                S3Bucket: !Sub ${NamePrefix}-artifacts-eu-central-1-521352391231
+                S3ObjectKey: package.zip
+                PollForSourceChanges: false
+              OutputArtifacts:
+                - Name: SourceArtifact
+              RunOrder: 1
+        - Name: Build
+          Actions:
+          - Name: Build
+            ActionTypeId:
+              Category: Build
+              Owner: AWS
+              Version: '1'
+              Provider: CodeBuild
+            Configuration:
+              ProjectName: !Ref BuildProject
+              PrimarySource: SourceArtifact
+            RunOrder: 1
+            InputArtifacts:
+              - Name: SourceArtifact
+            OutputArtifacts:
+              - Name: BuildArtifact
+        - Name: DeployToDevelopment
+          Actions:
+            - Name: Deploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: '1'
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: CREATE_UPDATE
+                StackName: !Ref NamePrefix
+                Capabilities: CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND
+                TemplatePath: BuildArtifact::templates/iac/master.yml
+                TemplateConfiguration: BuildArtifact::templates/iac/master-parameters.json
+                RoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/${NamePrefix}-deployment-role
+              InputArtifacts:
+                - Name: BuildArtifact
+        - Name: DeployFrontend
+          Actions:
+            - Name: SyncFrontendToS3
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: '1'
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref FrontendDeployProject
+                PrimarySource: SourceArtifact
+              RunOrder: 1
+              InputArtifacts:
+                - Name: SourceArtifact
+
+  # Separate CodeBuild project to sync frontend to S3 after CFN deploy
+  FrontendDeployProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${NamePrefix}-frontend-deploy
+      ServiceRole: !GetAtt BuildRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        EnvironmentVariables:
+          - Name: PREFIX
+            Value: !Ref NamePrefix
+          - Name: ARTIFACTS_ACCOUNT
+            Value: !Ref AWS::AccountId
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            build:
+              commands:
+                - ARTIFACTS_BUCKET=${PREFIX}-artifacts-${AWS_REGION}-${ARTIFACTS_ACCOUNT}
+                - FRONTEND_BUCKET=${PREFIX}-frontend-dev-eu-central-1
+                - echo Syncing frontend assets from artifacts bucket to frontend bucket...
+                - aws s3 sync s3://$ARTIFACTS_BUCKET/artifacts/frontend/ s3://$FRONTEND_BUCKET/ --delete
+                - echo Frontend deployment complete
+      TimeoutInMinutes: 5
+
+  PipelineCloudWatchEventRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: !Sub ${NamePrefix}-cwe-pipeline-execution
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: codepipeline:StartPipelineExecution
+                Resource: !Sub arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}
+
+  PipelineCloudWatchEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: default
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - Object Created
+        detail:
+          bucket:
+            name:
+              - !Sub ${NamePrefix}-artifacts-eu-central-1-521352391231
+          object:
+            key:
+              - package.zip
+      Name: !Sub ${NamePrefix}-${AWS::Region}-pipeline-source-event-rule
+      State: ENABLED
+      Targets:
+        - Arn: !Sub arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}
+          RoleArn: !GetAtt PipelineCloudWatchEventRole.Arn
+          Id: codepipeline-Pipeline
+
+Outputs:
+  ArtifactsBucket:
+    Description: "The name of the artifact bucket"
+    Value: !Sub ${NamePrefix}-artifacts-eu-central-1-521352391231

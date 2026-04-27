@@ -1,0 +1,22 @@
+{
+  "name": "tg-template-webapp-cron",
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "test:status-updater": "node -e \"import('./src/handlers/tg-status-updater.js').then(m => m.handler())\"",
+    "test:ie-status-updater": "node -e \"import('./src/handlers/ie-status-updater.js').then(m => m.handler())\"",
+    "test:deadline-reminder": "node -e \"import('./src/handlers/deadline-reminder.js').then(m => m.handler())\"",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.4",
+    "mysql2": "^3.9.0",
+    "@aws-sdk/client-ses": "^3.500.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.56.0"
+  }
+}

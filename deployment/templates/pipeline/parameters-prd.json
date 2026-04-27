@@ -1,0 +1,21 @@
+{
+  "Parameters": {
+    "Environment": "prd",
+    "NamePrefix": "upov-tg-template-webapp",
+    "InfraStackName": "upov-tg-template-infra",
+    "OidcTokenUri": "https://www3.wipo.int/am/oauth2/access_token",
+    "OidcUserinfoUri": "https://www3.wipo.int/am/oauth2/userinfo",
+    "OidcClientId": "tg-template",
+    "OidcRedirectUri": "https://tg-template.upov.int/auth/callback",
+    "FrontendUrl": "https://tg-template.upov.int",
+    "EntraidTenantId": "faa31b06-8ccc-48c9-867f-f7510dd11c02",
+    "EntraidClientId": "b295aff3-687d-458a-9fe2-7de6635dd454",
+    "OidcAuthorizationUri": "https://www3.wipo.int/am/oauth2/authorize",
+    "OidcScopes": "openid email profile office address",
+    "SendMail": "TRUE",
+    "PublicApiEndpoint": "",
+    "AlbDnsName": "",
+    "DocGenerateUrl": "http://<ALB_DNS>:8083",
+    "DocCompareUrl": "http://<ALB_DNS>:8084"
+  }
+}

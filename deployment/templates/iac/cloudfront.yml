@@ -1,0 +1,192 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: TG Template Webapp - CloudFront Distribution
+
+Parameters:
+  NamePrefix:
+    Type: String
+  Environment:
+    Type: String
+    AllowedValues: [dev, acc, prd]
+  FrontendBucketDomainName:
+    Type: String
+    Description: S3 bucket domain name for frontend static files
+  FrontendBucketArn:
+    Type: String
+    Description: S3 bucket ARN for OAC policy
+  WebappApiEndpoint:
+    Type: String
+    Description: Webapp API Gateway endpoint (BFF)
+  PublicApiEndpoint:
+    Type: String
+    Description: Public API Gateway endpoint (tg-template-api)
+  AlbDnsName:
+    Type: String
+    Description: ALB DNS name for doc-generate/doc-compare origins
+  CertificateArn:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /upov-tg-template-infra/alb/dns-certificate-arn
+    Description: ACM certificate ARN (must be in us-east-1 for CloudFront, or same-region for regional)
+  PublicHostedZoneId:
+    Type: String
+    Description: Route53 hosted zone ID
+  PublicHostedZoneName:
+    Type: String
+    Description: Route53 hosted zone name (with trailing dot)
+
+Conditions:
+  IsPrd: !Equals [!Ref Environment, prd]
+
+Resources:
+  # Origin Access Control for S3
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub ${NamePrefix}-oac-${Environment}
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub ${NamePrefix} (${Environment})
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+
+        # Domain aliases
+        Aliases:
+          - !Join
+            - '.'
+            - - cdn
+              - !Ref PublicHostedZoneName
+        ViewerCertificate:
+          AcmCertificateArn: !Ref CertificateArn
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+
+        # ---- Origins ----
+        Origins:
+          # 1. S3 frontend (Vue.js SPA)
+          - Id: s3-frontend
+            DomainName: !Ref FrontendBucketDomainName
+            OriginAccessControlId: !Ref OriginAccessControl
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+
+          # 2. Webapp API Gateway (BFF - /api/*)
+          - Id: webapp-api
+            DomainName: !Select
+              - 2
+              - !Split ['/', !Ref WebappApiEndpoint]
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+
+          # 3. Public API Gateway (tg-template-api - /api/v1/*)
+          - Id: public-api
+            DomainName: !Select
+              - 2
+              - !Split ['/', !Ref PublicApiEndpoint]
+            OriginPath: /v1
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+
+          # 4. ALB (doc-generate, doc-compare - ECS services)
+          - Id: alb-services
+            DomainName: !Ref AlbDnsName
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+
+        # ---- Default behavior: S3 frontend ----
+        DefaultCacheBehavior:
+          TargetOriginId: s3-frontend
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # CachingOptimized
+          Compress: true
+
+        # ---- Path-based behaviors (ordered by precedence) ----
+        CacheBehaviors:
+          # /api/v1/* -> Public API Gateway
+          - PathPattern: /api/v1/*
+            TargetOriginId: public-api
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac  # AllViewerExceptHostHeader
+            Compress: true
+
+          # /api/* -> Webapp API Gateway (BFF)
+          - PathPattern: /api/*
+            TargetOriginId: webapp-api
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac  # AllViewerExceptHostHeader
+            Compress: true
+
+          # /doc-generate* -> ALB (ECS)
+          - PathPattern: /doc-generate*
+            TargetOriginId: alb-services
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # CachingDisabled
+            OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3  # AllViewer
+            Compress: true
+
+          # /doc-compare* -> ALB (ECS)
+          - PathPattern: /doc-compare*
+            TargetOriginId: alb-services
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # CachingDisabled
+            OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3  # AllViewer
+            Compress: true
+
+        # SPA: serve index.html for Vue Router paths
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Application
+          Value: tg-template-webapp
+
+  # DNS Record - CNAME/Alias to CloudFront
+  DnsRecord:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId: !Ref PublicHostedZoneId
+      RecordSets:
+        - Name: !Join
+            - '.'
+            - - cdn
+              - !Ref PublicHostedZoneName
+          Type: A
+          AliasTarget:
+            HostedZoneId: Z2FDTNDATAQYW2  # CloudFront global hosted zone ID (fixed)
+            DNSName: !GetAtt Distribution.DomainName
+
+Outputs:
+  DistributionId:
+    Description: CloudFront distribution ID
+    Value: !Ref Distribution
+    Export:
+      Name: !Sub ${NamePrefix}-CloudFrontDistributionId
+
+  DistributionDomainName:
+    Description: CloudFront distribution domain name
+    Value: !GetAtt Distribution.DomainName

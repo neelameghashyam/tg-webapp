@@ -1,0 +1,1159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TG-WEBApp — Cron Job Analysis</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:       #0a0c10;
+    --surface:  #111318;
+    --card:     #161a22;
+    --border:   #222733;
+    --accent1:  #4ade80;   /* green  – existing */
+    --accent2:  #f97316;   /* orange – new      */
+    --accent3:  #38bdf8;   /* blue   – info      */
+    --accent4:  #f43f5e;   /* red    – issues    */
+    --accent5:  #a78bfa;   /* purple – email     */
+    --dim:      #4b5563;
+    --text:     #e2e8f0;
+    --muted:    #8a92a6;
+    --mono:     'JetBrains Mono', monospace;
+    --sans:     'Syne', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13.5px;
+    line-height: 1.7;
+    min-height: 100vh;
+  }
+
+  /* ── HERO ── */
+  .hero {
+    position: relative;
+    overflow: hidden;
+    padding: 64px 48px 48px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(135deg, #0d1117 0%, #0a1020 60%, #0a0c10 100%);
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 60% 40% at 80% 20%, rgba(74,222,128,.07) 0%, transparent 70%),
+      radial-gradient(ellipse 40% 60% at 10% 90%, rgba(56,189,248,.06) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .hero-grid-lines {
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+  .hero-tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .18em;
+    color: var(--accent1);
+    text-transform: uppercase;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .hero-tag::before {
+    content: '';
+    display: inline-block;
+    width: 20px; height: 1px;
+    background: var(--accent1);
+  }
+  .hero h1 {
+    font-family: var(--sans);
+    font-size: clamp(28px, 4vw, 48px);
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -.02em;
+    position: relative;
+  }
+  .hero h1 span { color: var(--accent1); }
+  .hero-sub {
+    margin-top: 14px;
+    color: var(--muted);
+    font-size: 12px;
+    max-width: 640px;
+    line-height: 1.9;
+  }
+  .hero-badges {
+    margin-top: 28px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .badge {
+    font-size: 10px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    padding: 4px 12px;
+    border-radius: 3px;
+    font-weight: 500;
+    border: 1px solid;
+  }
+  .badge-green  { border-color: var(--accent1); color: var(--accent1); background: rgba(74,222,128,.07); }
+  .badge-orange { border-color: var(--accent2); color: var(--accent2); background: rgba(249,115,22,.07); }
+  .badge-blue   { border-color: var(--accent3); color: var(--accent3); background: rgba(56,189,248,.07); }
+  .badge-red    { border-color: var(--accent4); color: var(--accent4); background: rgba(244,63,94,.07); }
+  .badge-purple { border-color: var(--accent5); color: var(--accent5); background: rgba(167,139,250,.07); }
+
+  /* ── LAYOUT ── */
+  .page { display: flex; gap: 0; }
+  .sidebar {
+    width: 240px;
+    min-width: 240px;
+    height: 100vh;
+    position: sticky;
+    top: 0;
+    overflow-y: auto;
+    padding: 28px 0;
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .sidebar-title {
+    font-size: 9px;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: var(--dim);
+    padding: 0 20px 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 12px;
+  }
+  .nav-item {
+    display: block;
+    padding: 7px 20px;
+    font-size: 11px;
+    color: var(--muted);
+    text-decoration: none;
+    transition: color .15s, background .15s;
+    border-left: 2px solid transparent;
+    line-height: 1.4;
+  }
+  .nav-item:hover { color: var(--text); background: rgba(255,255,255,.03); }
+  .nav-item.active { color: var(--accent1); border-left-color: var(--accent1); background: rgba(74,222,128,.05); }
+  .nav-group {
+    font-size: 9px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--dim);
+    padding: 16px 20px 4px;
+  }
+
+  .content {
+    flex: 1;
+    padding: 48px 52px;
+    max-width: 960px;
+    overflow-x: hidden;
+  }
+
+  /* ── ARCH NOTE ── */
+  .arch-note {
+    background: rgba(56,189,248,.06);
+    border: 1px solid rgba(56,189,248,.2);
+    border-radius: 6px;
+    padding: 18px 22px;
+    margin-bottom: 48px;
+    font-size: 12px;
+    line-height: 1.8;
+    color: #a0c8e0;
+  }
+  .arch-note strong { color: var(--accent3); }
+
+  /* ── SECTION ── */
+  .section { margin-bottom: 72px; }
+  .section-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 18px;
+    margin-bottom: 28px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .cron-number {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .1em;
+    color: var(--bg);
+    background: var(--accent1);
+    width: 28px; height: 28px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 4px;
+  }
+  .cron-number.new { background: var(--accent2); }
+  .cron-number.mixed { background: linear-gradient(135deg, var(--accent1), var(--accent2)); }
+  .section-title-block { flex: 1; }
+  .section-title {
+    font-family: var(--sans);
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -.01em;
+  }
+  .section-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .meta-chip {
+    font-size: 10px;
+    padding: 3px 10px;
+    border-radius: 2px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+  .meta-chip span { color: var(--text); }
+
+  /* ── SUB SECTIONS ── */
+  .sub-section { margin-bottom: 28px; }
+  .sub-label {
+    font-size: 9px;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .sub-label .icon { font-size: 12px; }
+  .sub-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+    margin-left: 8px;
+  }
+
+  /* ── PURPOSE BLOCK ── */
+  .purpose-block {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px 20px;
+    font-size: 12.5px;
+    color: var(--text);
+    line-height: 1.8;
+  }
+
+  /* ── TABLES ── */
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    margin-top: 4px;
+  }
+  .data-table th {
+    text-align: left;
+    font-size: 9px;
+    letter-spacing: .15em;
+    text-transform: uppercase;
+    color: var(--dim);
+    padding: 8px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-weight: 500;
+  }
+  .data-table td {
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    color: var(--text);
+    vertical-align: top;
+    line-height: 1.6;
+  }
+  .data-table tr:nth-child(odd) td { background: var(--card); }
+  .data-table tr:nth-child(even) td { background: rgba(22,26,34,.5); }
+  .data-table tr:hover td { background: rgba(74,222,128,.04); }
+
+  /* ── CODE BLOCK ── */
+  .code-block {
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 18px 20px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.8;
+    overflow-x: auto;
+    white-space: pre;
+    color: #c9d1d9;
+  }
+  .code-block .c-green  { color: #4ade80; }
+  .code-block .c-blue   { color: #79c0ff; }
+  .code-block .c-orange { color: #ffa657; }
+  .code-block .c-purple { color: #d2a8ff; }
+  .code-block .c-gray   { color: #8b949e; }
+  .code-block .c-red    { color: #f47067; }
+
+  /* ── EMAIL TEMPLATE ── */
+  .template-box {
+    background: #0d1117;
+    border: 1px solid rgba(167,139,250,.2);
+    border-radius: 6px;
+    padding: 18px 22px;
+    font-size: 11.5px;
+    line-height: 1.9;
+  }
+  .template-var {
+    color: var(--accent5);
+    font-weight: 600;
+  }
+  .template-link {
+    color: var(--accent3);
+    text-decoration: underline;
+  }
+
+  /* ── ISSUES ── */
+  .issues-list { display: flex; flex-direction: column; gap: 10px; }
+  .issue-item {
+    background: rgba(244,63,94,.05);
+    border: 1px solid rgba(244,63,94,.18);
+    border-left: 3px solid var(--accent4);
+    border-radius: 4px;
+    padding: 12px 16px;
+    font-size: 12px;
+    line-height: 1.75;
+  }
+  .issue-num {
+    font-size: 9px;
+    letter-spacing: .1em;
+    color: var(--accent4);
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .severity {
+    display: inline-block;
+    font-size: 9px;
+    padding: 1px 7px;
+    border-radius: 2px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    vertical-align: middle;
+    margin-left: 6px;
+  }
+  .sev-high   { background: rgba(244,63,94,.2);  color: #f87171; }
+  .sev-medium { background: rgba(249,115,22,.2); color: #fb923c; }
+  .sev-low    { background: rgba(74,222,128,.15); color: #86efac; }
+
+  /* ── STATUS TAG ── */
+  .status-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    padding: 4px 12px;
+    border-radius: 3px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    margin-top: 4px;
+  }
+  .status-existing { background: rgba(74,222,128,.1); color: var(--accent1); border: 1px solid rgba(74,222,128,.25); }
+  .status-new      { background: rgba(249,115,22,.1); color: var(--accent2); border: 1px solid rgba(249,115,22,.25); }
+  .status-mixed    { background: rgba(167,139,250,.1); color: var(--accent5); border: 1px solid rgba(167,139,250,.25); }
+
+  /* ── SUMMARY TABLE SECTION ── */
+  .summary-section {
+    margin-bottom: 72px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .summary-header {
+    padding: 18px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    font-family: var(--sans);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: -.01em;
+  }
+  .summary-header span { color: var(--accent3); }
+
+  /* ── GLOBAL ISSUES ── */
+  .global-issue-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 12px;
+    align-items: center;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .global-issue-row:last-child { border-bottom: none; }
+  .global-issue-row:hover { background: rgba(255,255,255,.02); }
+
+  /* ── DIVIDER ── */
+  .divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border), transparent);
+    margin: 40px 0;
+  }
+
+  /* ── SCROLLBAR ── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* ── INLINE CODE ── */
+  code {
+    background: rgba(255,255,255,.08);
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: .92em;
+    color: #a5f3fc;
+  }
+
+  /* ── PRINT ── */
+  @media print {
+    .sidebar { display: none; }
+    .hero { break-after: avoid; }
+    .section { break-inside: avoid; }
+  }
+
+  /* ── ANIMATIONS ── */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .section { animation: fadeUp .4s ease both; }
+  .section:nth-child(2) { animation-delay: .05s; }
+  .section:nth-child(3) { animation-delay: .1s; }
+  .section:nth-child(4) { animation-delay: .15s; }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 800px) {
+    .sidebar { display: none; }
+    .content { padding: 28px 20px; }
+    .hero { padding: 36px 20px 28px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="hero-grid-lines"></div>
+  <div class="hero-tag">Deep Technical Analysis</div>
+  <h1>TG-WEBApp<br><span>Cron Job Report</span></h1>
+  <p class="hero-sub">
+    Complete analysis of all scheduled tasks — handlers, repositories, data flows,
+    email notifications, templates, new vs. existing classification, and identified risks.
+    Architecture: <strong>AWS Lambda + EventBridge</strong> · Runtime: <strong>Node.js 20.x ESM</strong> · DB: <strong>MySQL (mysql2)</strong>
+  </p>
+  <div class="hero-badges">
+    <span class="badge badge-green">3 Cron Jobs Found</span>
+    <span class="badge badge-orange">2 Partially New</span>
+    <span class="badge badge-blue">AWS EventBridge Triggers</span>
+    <span class="badge badge-purple">AWS SES Email</span>
+    <span class="badge badge-red">9 Issues Identified</span>
+  </div>
+</div>
+
+<div class="page">
+
+  <!-- SIDEBAR -->
+  <nav class="sidebar">
+    <div class="sidebar-title">Navigation</div>
+    <div class="nav-group">Architecture</div>
+    <a class="nav-item" href="#arch">Architecture Note</a>
+    <a class="nav-item" href="#summary">Summary Table</a>
+    <div class="nav-group">Cron Jobs</div>
+    <a class="nav-item" href="#job1">① TG Status Updater</a>
+    <a class="nav-item" href="#job2">② IE Status Updater</a>
+    <a class="nav-item" href="#job3">③ Deadline Reminder</a>
+    <div class="nav-group">Global</div>
+    <a class="nav-item" href="#global">Global Issues & Risks</a>
+  </nav>
+
+  <!-- MAIN CONTENT -->
+  <main class="content">
+
+    <!-- ARCH NOTE -->
+    <div class="arch-note" id="arch">
+      <strong>⚙ Architecture:</strong> All three cron jobs are <strong>AWS Lambda functions</strong> triggered by <strong>Amazon EventBridge (CloudWatch Events)</strong> rules — not <code>node-cron</code> or <code>setInterval</code>. They live in a separate <code>cron/</code> package, fully isolated from the main <code>backend/</code>. The <code>setInterval</code> found in <code>frontend/src/views/editor/EditorHeader.vue</code> is a UI-only clock timer (refreshes a "last updated" display every 30 s) — it is <em>not</em> a scheduled job and is excluded from this report.
+    </div>
+
+    <!-- SUMMARY -->
+    <div class="summary-section" id="summary">
+      <div class="summary-header">📊 <span>Cron Job Summary</span></div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Handler File</th>
+            <th>Schedule (UTC)</th>
+            <th>Pipeline</th>
+            <th>Sends Email</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>1</td>
+            <td><code>cron/src/handlers/tg-status-updater.js</code></td>
+            <td><code>cron(0 4 * * ? *)</code><br>04:00 daily</td>
+            <td>TWP + TC-EDC</td>
+            <td>No</td>
+            <td><span class="status-tag status-mixed">Existing + New TC-EDC</span></td>
+          </tr>
+          <tr>
+            <td>2</td>
+            <td><code>cron/src/handlers/ie-status-updater.js</code></td>
+            <td><code>cron(5 4 * * ? *)</code><br>04:05 daily</td>
+            <td>TWP</td>
+            <td>No</td>
+            <td><span class="status-tag status-existing">Existing</span></td>
+          </tr>
+          <tr>
+            <td>3</td>
+            <td><code>cron/src/handlers/deadline-reminder.js</code></td>
+            <td><code>cron(10 4 * * ? *)</code><br>04:10 daily</td>
+            <td>TWP + TC-EDC</td>
+            <td>Yes (AWS SES)</td>
+            <td><span class="status-tag status-mixed">Existing + New ECC</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ══════════════════════════════════════════ JOB 1 ═══════════════════════════════════════════ -->
+    <div class="section" id="job1">
+      <div class="section-header">
+        <div class="cron-number mixed">1</div>
+        <div class="section-title-block">
+          <div class="section-title">🕒 TG Status Updater</div>
+          <div class="section-meta">
+            <span class="meta-chip">File: <span>cron/src/handlers/tg-status-updater.js</span></span>
+            <span class="meta-chip">Schedule: <span>cron(0 4 * * ? *) — 04:00 UTC daily</span></span>
+            <span class="meta-chip">Lambda: <span>{NamePrefix}-tg-status-updater-{Environment}</span></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Purpose -->
+      <div class="sub-section">
+        <div class="sub-label"><span class="icon">🎯</span> Purpose</div>
+        <div class="purpose-block">
+          Automatically advances Test Guideline (TG) status codes based on deadline dates stored in the <code>TG</code> table. Handles six transitions across both the <strong>TWP pipeline</strong> (existing) and the newly added <strong>TC-EDC pipeline</strong>. No emails are sent — this is a pure database mutation job.
+        </div>
+      </div>
+
+      <!-- Functionality -->
+      <div class="sub-section">
+        <div class="sub-label"><span class="icon">⚙️</span> Functionality — Status Transitions</div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Repository Function</th>
+              <th>SQL Condition</th>
+              <th>Transition</th>
+              <th>Pipeline</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>updateToLEDraft()</code></td>
+              <td><code>LE_Draft_StartDate = CURRENT_DATE<br>AND Status_Code = 'CRT'<br>AND IsTGStatusOverride = 'N'</code></td>
+              <td><code>CRT → LED</code></td>
+              <td>TWP</td>
+            </tr>
+            <tr>
+              <td><code>updateToIEComments()</code></td>
+              <td><code>IE_Comments_StartDate = CURRENT_DATE<br>AND Status_Code = 'LED'<br>AND IsTGStatusOverride = 'N'</code></td>
+              <td><code>LED → IEC</code></td>
+              <td>TWP</td>
+            </tr>
+            <tr>
+              <td><code>updateToLEChecking()</code></td>
+              <td><code>LE_Checking_StartDate = CURRENT_DATE<br>AND Status_Code = 'IEC'<br>AND IsTGStatusOverride = 'N'</code></td>
+              <td><code>IEC → LEC</code></td>
+              <td>TWP</td>
+            </tr>
+            <tr>
+              <td><code>updateToSentToUpov()</code></td>
+              <td><code>DATE(LE_Checking_EndDate) + INTERVAL 1 DAY = CURRENT_DATE<br>AND Status_Code = 'LEC'<br>AND IsTGStatusOverride = 'N'</code></td>
+              <td><code>LEC → STU</code> + sets <code>CPI_date</code></td>
+              <td>TWP</td>
+            </tr>
+            <tr>
+              <td><code>updateToEccComments()</code> 🆕</td>
+              <td><code>ECC_StartDate = CURRENT_DATE<br>AND Status_Code = 'TCD'<br>AND CPI_TechWorkParty IN ('TC','TC-EDC')<br>AND IsTGStatusOverride = 'N'</code></td>
+              <td><code>TCD → ECC</code></td>
+              <td>TC-EDC</td>
+            </tr>
+            <tr>
+              <td><code>updateToStuFromEcc()</code> 🆕</td>
+              <td><code>DATE(ECC_EndDate) + INTERVAL 1 DAY = CURRENT_DATE<br>AND Status_Code = 'ECC'<br>AND IsTGStatusOverride = 'N'</code></td>
+              <td><code>ECC → STU</code></td>
+              <td>TC-EDC</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Data Flow -->
+      <div class="sub-section">
+        <div class="sub-label"><span class="icon">🗄️</span> Data Flow</div>
+        <div class="code-block"><span class="c-green">EventBridge</span> cron(0 4 * * ? *)
+  → <span class="c-blue">Lambda:</span> tg-status-updater
+    → <span class="c-orange">tg-status.js:</span> findTGsWithDateToday()   <span class="c-gray">[SELECT — diagnostic log only]</span>
+    → <span class="c-orange">tg-status.js:</span> updateToLEDraft()         <span class="c-gray">[UPDATE TG SET Status='LED']</span>
+    → <span class="c-orange">tg-status.js:</span> updateToIEComments()      <span class="c-gray">[UPDATE TG SET Status='IEC']</span>
+    → <span class="c-orange">tg-status.js:</span> updateToLEChecking()      <span class="c-gray">[UPDATE TG SET Status='LEC']</span>
+    → <span class="c-orange">tg-status.js:</span> updateToSentToUpov()      <span class="c-gray">[UPDATE TG SET Status='STU', CPI_date=NOW()]</span>
+    → <span class="c-purple">tg-status.js:</span> updateToEccComments()     <span class="c-gray">[UPDATE TG SET Status='ECC'] ← NEW</span>
+    → <span class="c-purple">tg-status.js:</span> updateToStuFromEcc()      <span class="c-gray">[UPDATE TG SET Status='STU'] ← NEW</span>
+      → <span class="c-green">DB:</span> upovtg.TG  (mysql2 pool, connectionLimit: 1)
+  → Returns: <span class="c-blue">{ statusCode: 200, results: { leDraft, ieComments, leChecking, sentToUpov, eccComments, stuFromEcc } }</span></div>
+
+        <table class="data-table" style="margin-top:14px">
+          <thead><tr><th>Layer</th><th>File</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td>Handler</td><td><code>cron/src/handlers/tg-status-updater.js</code></td><td>Orchestrates all 6 transition calls, logs results</td></tr>
+            <tr><td>Repository</td><td><code>cron/src/repositories/tg-status.js</code></td><td>All 6 SQL UPDATE functions + diagnostic SELECT</td></tr>
+            <tr><td>DB Utility</td><td><code>cron/src/utils/db.js</code></td><td>mysql2 connection pool (env: DB_HOST/PORT/USER/PASSWORD/NAME)</td></tr>
+            <tr><td>DB Table (W)</td><td><code>upovtg.TG</code></td><td>Status_Code, TG_LastUpdated, CPI_date (on STU)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Notifications -->
+      <div class="sub-section">
+        <div class="sub-label"><span class="icon">📧</span> Notifications / Emails</div>
+        <div class="purpose-block" style="color:var(--muted);">
+          <strong style="color:var(--text)">None.</strong> This job performs only database mutations. No emails or in-app notifications are sent at any point.
+        </div>
+      </div>
+
+      <!-- Templates -->
+      <div class="sub-section">
+        <div class="sub-label"><span class="icon">🧾</span> Templates Used</div>
+        <div class="purpose-block" style="color:var(--muted);">
+          <strong style="color:var(--text)">None.</strong>
+        </div>
+      </div>
+
+      <!-- Status -->
+      <div class="sub-section">
+        <div class="sub-label"><span class="icon">🆕</span> Classification</div>
+        <span class="status-tag status-mixed">Partially New</span>
+        <p style="margin-top:10px;font-size:12px;color:var(--muted)">TWP transitions (CRT→LED, LED→IEC, IEC→LEC, LEC→STU) are <strong style="color:var(--accent1)">existing</strong>. TC-EDC transitions via <code>updateToEccComments()</code> and <code>updateToStuFromEcc()</code> are <strong style="color:var(--accent2)">newly implemented</strong>.</p>
+      </div>
+
+      <!-- Issues -->
+      <div class="sub-section">
+        <div class="sub-label"><span class="icon">⚠️</span> Issues</div>
+        <div class="issues-list">
+          <div class="issue-item">
+            <div class="issue-num">ISSUE 1 <span class="severity sev-high">HIGH</span></div>
+            <strong>No retry / partial-failure recovery.</strong> If any <code>UPDATE</code> throws (e.g. DB connectivity loss), the handler re-throws, aborting all remaining transitions for that day. TGs that should have been promoted will stay in their old status until the next 04:00 UTC run — a 24-hour lag with no automated recovery.
+          </div>
+          <div class="issue-item">
+            <div class="issue-num">ISSUE 2 <span class="severity sev-medium">MEDIUM</span></div>
+            <strong><code>CPI_date</code> not set on TC-EDC path.</strong> <code>updateToSentToUpov()</code> sets <code>CPI_date = CURRENT_TIMESTAMP</code> when LEC→STU. The new <code>updateToStuFromEcc()</code> (ECC→STU) does <em>not</em> set <code>CPI_date</code>. If <code>CPI_date</code> is used downstream as a "completed pipeline" marker, TC-EDC TGs will have a null value.
+          </div>
+          <div class="issue-item">
+            <div class="issue-num">ISSUE 3 <span class="severity sev-low">LOW</span></div>
+            <strong><code>findTGsWithDateToday()</code> is dead-weight diagnostic code.</strong> The result is only logged; it does not filter the subsequent UPDATEs. If removed, behaviour is identical. Also, this diagnostic SELECT is missing <code>ECC_StartDate</code> awareness — it checks <code>LE_Draft_EndDate</code> and <code>LE_Checking_EndDate</code> but not <code>ECC_EndDate</code> in one of its OR branches.
+          </div>
+          <div class="issue-item">
+            <div class="issue-num">ISSUE 4 <span class="severity sev-low">LOW</span></div>
+            <strong>Silent skip on <code>IsTGStatusOverride = 'Y'</code>.</strong> Overridden TGs are silently excluded from all transitions. No log entry is emitted per skipped TG. Debugging override-related issues in production requires manual DB inspection.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- ══════════════════════════════════════════ JOB 2 ═══════════════════════════════════════════ -->
+    <div class="section" id="job2">
+      <div class="section-header">
+        <div class="cron-number">2</div>
+        <div class="section-title-block">
+          <div class="section-title">🕒 IE Status Updater</div>
+          <div class="section-meta">
+            <span class="meta-chip">File: <span>cron/src/handlers/ie-status-updater.js</span></span>
+            <span class="meta-chip">Schedule: <span>cron(5 4 * * ? *) — 04:05 UTC daily</span></span>
+            <span class="meta-chip">Lambda: <span>{NamePrefix}-ie-status-updater-{Environment}</span></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Purpose -->
+      <div class="sub-section">
+        <div class="sub-label"><span class="icon">🎯</span> Purpose</div>
+        <div class="purpose-block">
+          After Job #1 promotes TGs to <code>LEC</code> or <code>LES</code>, this job deactivates all Interested Expert (IE) role assignments on those TGs by setting <code>Tg_Users.Status_Code = 'I'</code> (Inactive). The 5-minute offset from Job #1 ensures newly transitioned TGs are already in <code>LEC/LES</code> before this SELECT runs.
+        </div>
+      </div>
+
+      <!-- Functionality -->
+      <div class="sub-section">
+        <div class="sub-label"><span class="icon">⚙️</span> Functionality</div>
+        <table class="data-table">
+          <thead>
+            <tr><th>Step</th><th>Function</th><th>SQL</th><th>File</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td><code>findTGIdsByStatus(['LEC','LES'])</code></td>
+              <td><code>SELECT TG_ID FROM TG WHERE Status_Code IN ('LEC','LES')</code></td>
+              <td><code>cron/src/repositories/tg-user.js</code></td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>Early-exit if empty</td>
+              <td>—</td>
+              <td><code>cron/src/handlers/ie-status-updater.js</code></td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td><code>deactivateIEUsers(ids)</code></td>
+              <td><code>UPDATE Tg_Users SET Status_Code = 'I' WHERE TG_ID IN (...) AND Role_Code = 'IE'</code></td>
+              <td><code>cron/src/repositories/tg-user.js</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Data Flow -->
+      <div class="sub-section">
+        <div class="sub-label"><span class="icon">🗄️</span> Data Flow</div>
+        <div class="code-block"><span class="c-green">EventBridge</span> cron(5 4 * * ? *)  <span class="c-gray">[5 min after Job #1]</span>
+  → <span class="c-blue">Lambda:</span> ie-status-updater
+    → <span class="c-orange">tg-user.js:</span> findTGIdsByStatus(['LEC','LES'])
+        <span class="c-gray">SELECT TG_ID FROM TG WHERE Status_Code IN ('LEC','LES')</span>
+    → <span class="c-gray">if (tgRows.length === 0) → return 200 { updated: 0 }</span>
+    → <span class="c-orange">tg-user.js:</span> deactivateIEUsers(ids)
+        <span class="c-gray">UPDATE Tg_Users SET Status_Code = 'I'</span>
+        <span class="c-gray">WHERE TG_ID IN (?, ...) AND Role_Code = 'IE'</span>
+      → <span class="c-green">DB:</span> upovtg.TG (R), upovtg.Tg_Users (W)
+  → Returns: <span class="c-blue">{ tgsProcessed: N, usersUpdated: M }</span></div>
+
+        <table class="data-table" style="margin-top:14px">
+          <thead><tr><th>Layer</th><th>File</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td>Handler</td><td><code>cron/src/handlers/ie-status-updater.js</code></td><td>Orchestrates SELECT + UPDATE, early-exit guard</td></tr>
+            <tr><td>Repository</td><td><code>cron/src/repositories/tg-user.js</code></td><td>Both SQL functions</td></tr>
+            <tr><td>DB Utility</td><td><code>cron/src/utils/db.js</code></td><td>mysql2 connection pool</td></tr>
+            <tr><td>DB Table (R)</td><td><code>upovtg.TG</code></td><td>Status_Code</td></tr>
+            <tr><td>DB Table (W)</td><td><code>upovtg.Tg_Users</code></td><td>Status_Code (set to 'I' for Role_Code='IE')</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Notifications -->
+      <div class="sub-section">
+        <div class="sub-label"><span class="icon">📧</span> Notifications / Emails</div>
+        <div class="purpose-block" style="color:var(--muted);">
+          <strong style="color:var(--text)">None.</strong> Pure database update. No emails or in-app notifications.
+        </div>
+      </div>
+
+      <!-- Templates -->
+      <div class="sub-section">
+        <div class="sub-label"><span class="icon">🧾</span> Templates Used</div>
+        <div class="purpose-block" style="color:var(--muted);"><strong style="color:var(--text)">None.</strong></div>
+      </div>
+
+      <!-- Status -->
+      <div class="sub-section">
+        <div class="sub-label"><span class="icon">🆕</span> Classification</div>
+        <span class="status-tag status-existing">Existing</span>
+        <p style="margin-top:10px;font-size:12px;color:var(--muted)">No new code added. Not referenced as a new feature in requirements documents.</p>
+      </div>
+
+      <!-- Issues -->
+      <div class="sub-section">
+        <div class="sub-label"><span class="icon">⚠️</span> Issues</div>
+        <div class="issues-list">
+          <div class="issue-item">
+            <div class="issue-num">ISSUE 1 <span class="severity sev-high">HIGH</span></div>
+            <strong>Timing dependency on Job #1 with no hard guarantee.</strong> The 5-minute gap is hardcoded in <code>cron.yml</code>. If Job #1 takes longer than 5 minutes (slow DB, large dataset), this job runs before Job #1 finishes, missing newly-transitioned TGs. No explicit Lambda chaining or Step Function coordination exists.
+          </div>
+          <div class="issue-item">
+            <div class="issue-num">ISSUE 2 <span class="severity sev-medium">MEDIUM</span></div>
+            <strong>Re-deactivates IEs on all LEC/LES TGs daily, not just new ones.</strong> Every day it issues an UPDATE on every TG in LEC/LES — including those transitioned days/weeks ago whose IEs were already deactivated. Idempotent but produces unnecessary writes and no-op DB round-trips.
+          </div>
+          <div class="issue-item">
+            <div class="issue-num">ISSUE 3 <span class="severity sev-low">LOW</span></div>
+            <strong>Unbounded <code>IN</code> clause.</strong> <code>deactivateIEUsers(ids)</code> builds <code>WHERE TG_ID IN (?, ?, ...)</code> dynamically. In a production system with many TGs in LEC/LES, this clause can grow very large, causing potential DB performance degradation or query plan issues.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- ══════════════════════════════════════════ JOB 3 ═══════════════════════════════════════════ -->
+    <div class="section" id="job3">
+      <div class="section-header">
+        <div class="cron-number mixed">3</div>
+        <div class="section-title-block">
+          <div class="section-title">🕒 Deadline Reminder</div>
+          <div class="section-meta">
+            <span class="meta-chip">File: <span>cron/src/handlers/deadline-reminder.js</span></span>
+            <span class="meta-chip">Schedule: <span>cron(10 4 * * ? *) — 04:10 UTC daily</span></span>
+            <span class="meta-chip">Lambda: <span>{NamePrefix}-deadline-reminder-{Environment}</span></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Purpose -->
+      <div class="sub-section">
+        <div class="sub-label"><span class="icon">🎯</span> Purpose</div>
+        <div class="purpose-block">
+          Sends email reminders via <strong>AWS SES</strong> to Lead Experts (LE), Interested Experts (IE), and EDC Members about upcoming TG phase deadlines. Covers 3 TWP pipeline phases (existing) and the newly added TC-EDC ECC phase. Emails are deduplicated per recipient so users assigned to multiple TGs receive one consolidated email.
+        </div>
+      </div>
+
+      <!-- Functionality -->
+      <div class="sub-section">
+        <div class="sub-label"><span class="icon">⚙️</span> Functionality — Reminder Phases</div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Phase</th>
+              <th>Status</th>
+              <th>Date Columns</th>
+              <th>Recipients</th>
+              <th>Triggers</th>
+              <th>Pipeline</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>LE Draft</td>
+              <td><code>LED</code></td>
+              <td><code>LE_Draft_StartDate</code><br><code>LE_Draft_EndDate</code></td>
+              <td>Role = <code>LE</code></td>
+              <td>On start (offset=0)<br>7 days before end</td>
+              <td>TWP</td>
+            </tr>
+            <tr>
+              <td>IE Comments</td>
+              <td><code>IEC</code></td>
+              <td><code>IE_Comments_StartDate</code><br><code>IE_Comments_EndDate</code></td>
+              <td>Role = <code>IE</code></td>
+              <td>On start (offset=0)<br>7 days before end</td>
+              <td>TWP</td>
+            </tr>
+            <tr>
+              <td>LE Checking</td>
+              <td><code>LEC</code></td>
+              <td><code>LE_Checking_StartDate</code><br><code>LE_Checking_EndDate</code></td>
+              <td>Role = <code>LE</code></td>
+              <td>On start (offset=0)<br>7 days before end</td>
+              <td>TWP</td>
+            </tr>
+            <tr>
+              <td>EDC Comments 🆕</td>
+              <td><code>TCD</code> (start) / <code>ECC</code> (end)</td>
+              <td><code>ECC_StartDate</code><br><code>ECC_EndDate</code></td>
+              <td>All EDC Members of latest TC/TC-EDC session</td>
+              <td>On start (offset=0)<br>7 days before end</td>
+              <td>TC-EDC</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Data Flow -->
+      <div class="sub-section">
+        <div class="sub-label"><span class="icon">🗄️</span> Data Flow</div>
+        <div class="code-block"><span class="c-green">EventBridge</span> cron(10 4 * * ? *)
+  → <span class="c-blue">Lambda:</span> deadline-reminder
+    <span class="c-gray">── TWP Pipeline (3 phases × 2 queries each) ──────────────────</span>
+    → <span class="c-orange">reminder.js:</span> findPhaseStartReminders('LE_Draft_StartDate', 'LE_Draft_EndDate', 0, 'LED', 'LE')
+        <span class="c-gray">JOIN TG → Tg_Users → User_Profile</span>
+        <span class="c-gray">WHERE DATE(LE_Draft_StartDate) = CURRENT_DATE + INTERVAL 0 DAY</span>
+    → <span class="c-orange">reminder.js:</span> findPhaseEndReminders('LE_Draft_StartDate', 'LE_Draft_EndDate', 7, 'LED', 'LE')
+        <span class="c-gray">WHERE DATE(LE_Draft_EndDate) = CURRENT_DATE + INTERVAL 7 DAY</span>
+    <span class="c-gray">... same pattern for IEC (IE role) and LEC (LE role) ...</span>
+    → deduplicate by email (Map)
+    → per recipient: build inline HTML, call <span class="c-purple">mail.js</span>: sendEmail()
+        → <span class="c-green">AWS SES</span>: SendEmailCommand
+          From: noreply@upov.int
+          BCC:  tgtemplate@upov.int (hardcoded)
+    <span class="c-gray">── TC-EDC Pipeline (NEW) ─────────────────────────────────────</span>
+    → <span class="c-purple">reminder.js:</span> findEccStartReminders(0)
+        <span class="c-gray">JOIN TG → EDC_Members → User_Profile</span>
+        <span class="c-gray">WHERE DATE(ECC_StartDate) = CURRENT_DATE AND Status_Code = 'TCD'</span>
+    → <span class="c-purple">reminder.js:</span> findEccEndReminders(7)
+        <span class="c-gray">WHERE DATE(ECC_EndDate) = CURRENT_DATE + INTERVAL 7 DAY AND Status_Code = 'ECC'</span>
+    → deduplicate by email (Map)
+    → per EDC member: build inline HTML, call <span class="c-purple">mail.js</span>: sendEmail()
+        → <span class="c-green">AWS SES</span>: SendEmailCommand
+  → Returns: <span class="c-blue">{ results: { leDraft, ieComments, leChecking, eccPhase } }</span></div>
+
+        <table class="data-table" style="margin-top:14px">
+          <thead><tr><th>Layer</th><th>File</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td>Handler</td><td><code>cron/src/handlers/deadline-reminder.js</code></td><td>Orchestrates all phases, deduplication, email dispatch</td></tr>
+            <tr><td>Repository (TWP)</td><td><code>cron/src/repositories/reminder.js</code></td><td><code>findPhaseStartReminders()</code>, <code>findPhaseEndReminders()</code></td></tr>
+            <tr><td>Repository (ECC)</td><td><code>cron/src/repositories/reminder.js</code></td><td><code>findEccStartReminders()</code>, <code>findEccEndReminders()</code> — NEW</td></tr>
+            <tr><td>Email Util</td><td><code>cron/src/utils/mail.js</code></td><td>AWS SES wrapper, <code>formatDate()</code></td></tr>
+            <tr><td>DB Utility</td><td><code>cron/src/utils/db.js</code></td><td>mysql2 pool</td></tr>
+            <tr><td>DB Tables (R)</td><td><code>TG</code>, <code>Tg_Users</code>, <code>User_Profile</code>, <code>EDC_Members</code>, <code>technical_body</code></td><td>Joined for recipient lookup</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Notifications -->
+      <div class="sub-section">
+        <div class="sub-label"><span class="icon">📧</span> Notifications / Emails</div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Email Subject</th>
+              <th>Type</th>
+              <th>Trigger Condition</th>
+              <th>Recipients</th>
+              <th>BCC</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>TG Template - LE Draft Reminder</code></td>
+              <td>Start / 7-day warning</td>
+              <td><code>LE_Draft_StartDate = TODAY</code> or <code>LE_Draft_EndDate = TODAY+7</code><br>TG in <code>LED</code></td>
+              <td>Assigned <code>LE</code> users</td>
+              <td rowspan="4"><code>tgtemplate@upov.int</code> (hardcoded)</td>
+            </tr>
+            <tr>
+              <td><code>TG Template - IE Comments Reminder</code></td>
+              <td>Start / 7-day warning</td>
+              <td><code>IE_Comments_StartDate = TODAY</code> or <code>IE_Comments_EndDate = TODAY+7</code><br>TG in <code>IEC</code></td>
+              <td>Assigned <code>IE</code> users</td>
+            </tr>
+            <tr>
+              <td><code>TG Template - LE Checking Reminder</code></td>
+              <td>Start / 7-day warning</td>
+              <td><code>LE_Checking_StartDate = TODAY</code> or <code>LE_Checking_EndDate = TODAY+7</code><br>TG in <code>LEC</code></td>
+              <td>Assigned <code>LE</code> users</td>
+            </tr>
+            <tr>
+              <td><code>TG Template - EDC Comments Reminder</code> 🆕</td>
+              <td>Start / 7-day warning</td>
+              <td><code>ECC_StartDate = TODAY</code> (TG in <code>TCD</code>) or<br><code>ECC_EndDate = TODAY+7</code> (TG in <code>ECC</code>)</td>
+              <td>All EDC members of latest TC/TC-EDC session</td>
+            </tr>
+          </tbody>
+        </table>
+        <p style="margin-top:10px;font-size:11px;color:var(--muted)">
+          ⚡ <strong>Guard:</strong> Emails only sent when env var <code>SEND_MAIL=TRUE</code>. Otherwise, a log line is written: <code>[MAIL DISABLED] Would send to: ...</code> — no email is dispatched. Dev/Acc environments will NOT send emails unless explicitly enabled.
+        </p>
+      </div>
+
+      <!-- Templates -->
+      <div class="sub-section">
+        <div class="sub-label"><span class="icon">🧾</span> Email Templates</div>
+        <p style="margin-bottom:12px;font-size:12px;color:var(--muted)">
+          ⚠ <strong style="color:var(--accent4)">No external template files exist.</strong> All HTML bodies are <strong>inline template literals</strong> inside <code>deadline-reminder.js</code>. There is no templating engine (Handlebars, EJS, Nunjucks, etc.).
+        </p>
+
+        <p style="font-size:11px;color:var(--dim);margin-bottom:8px;">TWP Template (function: <code>sendReminders()</code> — lines ~66–74 of deadline-reminder.js)</p>
+        <div class="template-box">
+&lt;p&gt;Dear <span class="template-var">${recipient.firstName || 'Colleague'}</span>,&lt;/p&gt;
+&lt;p&gt;This is a reminder about the following Test Guidelines in the
+   &lt;b&gt;<span class="template-var">${phaseName}</span>&lt;/b&gt; phase:&lt;/p&gt;
+&lt;ul&gt;
+  &lt;li&gt;<span class="template-var">${tg.reference}</span>
+    &lt;b&gt;(<span class="template-var">${formatDate(tg.startDate)}</span> - <span class="template-var">${formatDate(tg.endDate)}</span>)&lt;/b&gt;&lt;/li&gt;
+  ...
+&lt;/ul&gt;
+&lt;p&gt;Please visit the &lt;a href="<span class="template-link">https://www3.wipo.int/upovtg</span>"&gt;TG Template application&lt;/a&gt;...&lt;/p&gt;
+&lt;p&gt;Best regards,&lt;br/&gt;UPOV TG Template System&lt;/p&gt;
+        </div>
+
+        <p style="font-size:11px;color:var(--dim);margin:14px 0 8px;">TC-EDC ECC Template (function: <code>sendEccReminders()</code> — lines ~103–112 of deadline-reminder.js) 🆕</p>
+        <div class="template-box">
+&lt;p&gt;Dear <span class="template-var">${recipient.firstName || 'Colleague'}</span>,&lt;/p&gt;
+&lt;p&gt;This is a reminder about the following Test Guidelines in the
+   &lt;b&gt;EDC Comments&lt;/b&gt; phase:&lt;/p&gt;
+&lt;ul&gt;
+  &lt;li&gt;<span class="template-var">${tg.reference}</span>
+    &lt;b&gt;(<span class="template-var">${formatDate(tg.startDate)}</span> - <span class="template-var">${formatDate(tg.endDate)}</span>)&lt;/b&gt;&lt;/li&gt;
+  ...
+&lt;/ul&gt;
+&lt;p&gt;Please visit the &lt;a href="<span class="template-link">https://www3.wipo.int/upovtg</span>"&gt;TG Template application&lt;/a&gt;
+   to review and submit your comments.&lt;/p&gt;
+&lt;p&gt;Best regards,&lt;br/&gt;UPOV TG Template System&lt;/p&gt;
+        </div>
+
+        <table class="data-table" style="margin-top:14px">
+          <thead><tr><th>Variable</th><th>Source</th><th>Fallback</th></tr></thead>
+          <tbody>
+            <tr><td><code>recipient.firstName</code></td><td><code>User_Profile.FirstName</code></td><td><code>'Colleague'</code></td></tr>
+            <tr><td><code>phaseName</code></td><td>Hardcoded string passed from handler (e.g. "LE Draft")</td><td>—</td></tr>
+            <tr><td><code>tg.reference</code></td><td><code>TG.TG_Reference</code></td><td>—</td></tr>
+            <tr><td><code>tg.startDate</code></td><td>Phase-specific start date column</td><td>—</td></tr>
+            <tr><td><code>tg.endDate</code></td><td>Phase-specific end date column</td><td>—</td></tr>
+            <tr><td><code>formatDate(date)</code></td><td><code>cron/src/utils/mail.js</code> — <code>toLocaleDateString('en-GB', {...})</code></td><td>—</td></tr>
+            <tr><td>App URL</td><td>Hardcoded: <code>https://www3.wipo.int/upovtg</code></td><td>No env var override</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Status -->
+      <div class="sub-section">
+        <div class="sub-label"><span class="icon">🆕</span> Classification</div>
+        <span class="status-tag status-mixed">Partially New</span>
+        <p style="margin-top:10px;font-size:12px;color:var(--muted)">TWP reminders (LE Draft, IE Comments, LE Checking) are <strong style="color:var(--accent1)">existing</strong>. The <code>sendEccReminders()</code> function, the <code>eccPhase</code> result bucket, and the <code>findEccStartReminders()</code> / <code>findEccEndReminders()</code> repository functions are <strong style="color:var(--accent2)">newly implemented</strong> for the TC-EDC pipeline.</p>
+      </div>
+
+      <!-- Issues -->
+      <div class="sub-section">
+        <div class="sub-label"><span class="icon">⚠️</span> Issues</div>
+        <div class="issues-list">
+          <div class="issue-item">
+            <div class="issue-num">ISSUE 1 <span class="severity sev-medium">MEDIUM</span></div>
+            <strong><code>findEccStartReminders</code> uses wrong status check.</strong> The start reminder queries for <code>Status_Code = 'TCD'</code>, meaning it fires while the TG is still in <em>pre-ECC</em> state. This is technically correct because Job #1 runs at 04:00 and transitions <code>TCD → ECC</code> before Job #3 runs at 04:10 — but it creates a fragile coupling. If Job #1 is delayed, the ECC start reminder fires while the TG is still <code>TCD</code>.
+          </div>
+          <div class="issue-item">
+            <div class="issue-num">ISSUE 2 <span class="severity sev-medium">MEDIUM</span></div>
+            <strong>ECC recipient query uses global latest-session subquery.</strong> Both <code>findEccStartReminders</code> and <code>findEccEndReminders</code> use <code>(SELECT tb.TB_CodeID FROM technical_body tb WHERE tb.TB_Code IN ('TC','TC-EDC') ORDER BY tb.TB_Year DESC LIMIT 1)</code> — this always picks the most recent TC/TC-EDC session globally. If a TG belongs to an older session, EDC members of the newest session receive a reminder for a TG they may not be reviewing.
+          </div>
+          <div class="issue-item">
+            <div class="issue-num">ISSUE 3 <span class="severity sev-medium">MEDIUM</span></div>
+            <strong>Hardcoded BCC and app URL in source code.</strong> <code>bccEmail = 'tgtemplate@upov.int'</code> and the link <code>https://www3.wipo.int/upovtg</code> are hardcoded with no env var override. Changing BCC or the URL for a different environment requires a code change and redeploy.
+          </div>
+          <div class="issue-item">
+            <div class="issue-num">ISSUE 4 <span class="severity sev-medium">MEDIUM</span></div>
+            <strong>No separate email template files — inline HTML only.</strong> Email body is a template literal inside the handler. No templating engine, no localisation support, no text/plain fallback (SES sends HTML-only). Changing copy requires a code deploy.
+          </div>
+          <div class="issue-item">
+            <div class="issue-num">ISSUE 5 <span class="severity sev-low">LOW</span></div>
+            <strong>Deduplication merges start + end reminder TGs into one email without labelling.</strong> If a user has one TG starting today and another TG ending in 7 days, both appear in the same email list without any label distinguishing "starts today" vs "ends soon". Recipients can't tell which TG is urgent.
+          </div>
+          <div class="issue-item">
+            <div class="issue-num">ISSUE 6 <span class="severity sev-low">LOW</span></div>
+            <strong>No in-app notifications.</strong> No <code>notifications</code> table writes, no WebSocket events, no push notifications. The system is email-only. Users who miss the email have no in-app indication of upcoming deadlines.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- GLOBAL ISSUES -->
+    <div class="section" id="global">
+      <div class="section-header">
+        <div class="cron-number" style="background:var(--accent4);">!</div>
+        <div class="section-title-block">
+          <div class="section-title">🚨 Global Issues & Risks</div>
+        </div>
+      </div>
+
+      <div class="summary-section" style="margin-bottom:0">
+        <div class="summary-header"><span>All cron jobs — cross-cutting risks</span></div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Risk</th>
+              <th>Severity</th>
+              <th>Affected Jobs</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>No inter-Lambda dependency — 5/10-minute timing gaps are arbitrary. If Job #1 is slow, Jobs #2 and #3 may run before it finishes</td>
+              <td><span class="severity sev-high">HIGH</span></td>
+              <td>Jobs 2 & 3</td>
+            </tr>
+            <tr>
+              <td>No retry or partial-failure recovery on any job — a DB error aborts mid-run with no rollback or re-queue</td>
+              <td><span class="severity sev-high">HIGH</span></td>
+              <td>All 3</td>
+            </tr>
+            <tr>
+              <td><code>technical_body</code> latest-session subquery in ECC reminders may notify wrong EDC members if multiple sessions exist</td>
+              <td><span class="severity sev-medium">MEDIUM</span></td>
+              <td>Job 3 (ECC)</td>
+            </tr>
+            <tr>
+              <td>Hardcoded BCC email (<code>tgtemplate@upov.int</code>) and app URL (<code>https://www3.wipo.int/upovtg</code>) in source — no env var override</td>
+              <td><span class="severity sev-medium">MEDIUM</span></td>
+              <td>Job 3</td>
+            </tr>
+            <tr>
+              <td>No email template files — inline HTML only, no localisation, no text/plain fallback</td>
+              <td><span class="severity sev-medium">MEDIUM</span></td>
+              <td>Job 3</td>
+            </tr>
+            <tr>
+              <td>IE deactivation runs on all LEC/LES TGs daily, not just newly-transitioned ones — redundant DB writes</td>
+              <td><span class="severity sev-low">LOW</span></td>
+              <td>Job 2</td>
+            </tr>
+            <tr>
+              <td>No logging of skipped TGs (when <code>IsTGStatusOverride = 'Y'</code>)</td>
+              <td><span class="severity sev-low">LOW</span></td>
+              <td>Job 1</td>
+            </tr>
+            <tr>
+              <td>No in-app notifications — cron-driven alerts are email-only</td>
+              <td><span class="severity sev-low">LOW</span></td>
+              <td>Job 3</td>
+            </tr>
+            <tr>
+              <td><code>connectionLimit: 1</code> in mysql2 pool — appropriate for Lambda but fragile if concurrency increases</td>
+              <td><span class="severity sev-low">LOW</span></td>
+              <td>All 3</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+  // Active nav highlighting on scroll
+  const sections = document.querySelectorAll('[id]');
+  const navItems = document.querySelectorAll('.nav-item');
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        navItems.forEach(n => n.classList.remove('active'));
+        const active = document.querySelector(`.nav-item[href="#${entry.target.id}"]`);
+        if (active) active.classList.add('active');
+      }
+    });
+  }, { threshold: 0.3, rootMargin: '-60px 0px -60% 0px' });
+  sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>

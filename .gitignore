@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+frontend/dist/
+deployment/artifacts/
+
+# Environment
+.env
+.env.local
+*.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Test
+coverage/
+
+# Temporary
+tmp/
+temp/
+
+# Claude Code local references
+.claude/
+
+# Local-only onboarding prompts
+docs/ONBOARD_*

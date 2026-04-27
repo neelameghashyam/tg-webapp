@@ -1,0 +1,140 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: TG Template Webapp - Lambda Functions
+
+Parameters:
+  NamePrefix:
+    Type: String
+  Environment:
+    Type: String
+  ArtifactsBucket:
+    Type: String
+  VpcId:
+    Type: String
+  SubnetIds:
+    Type: String
+  SecurityGroupId:
+    Type: String
+  DBEndpoint:
+    Type: String
+  OidcTokenUri:
+    Type: String
+  OidcUserinfoUri:
+    Type: String
+  OidcClientId:
+    Type: String
+  OidcRedirectUri:
+    Type: String
+  FrontendUrl:
+    Type: String
+  EntraidTenantId:
+    Type: String
+  EntraidClientId:
+    Type: String
+  OidcAuthorizationUri:
+    Type: String
+  OidcScopes:
+    Type: String
+    Default: 'openid email profile office address'
+  DocGenerateUrl:
+    Type: String
+  DocCompareUrl:
+    Type: String
+Resources:
+  # IAM Role for Lambda
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${NamePrefix}-lambda-role-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:/tg-template/*
+
+  # BFF Lambda Function (Hono app)
+  BffLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${NamePrefix}-bff-${Environment}
+      Runtime: nodejs20.x
+      Handler: src/index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref ArtifactsBucket
+        S3Key: artifacts/backend.zip
+      Timeout: 30
+      MemorySize: 512
+      VpcConfig:
+        SubnetIds: !Split [',', !Ref SubnetIds]
+        SecurityGroupIds:
+          - !Ref SecurityGroupId
+      Environment:
+        Variables:
+          NODE_ENV: !Ref Environment
+          DB_HOST: !Ref DBEndpoint
+          DB_PORT: '3306'
+          DB_NAME: upovtg
+          DB_USER: !Sub '{{resolve:secretsmanager:/tg-template/rds/credentials/master:SecretString:username}}'
+          DB_PASSWORD: !Sub '{{resolve:secretsmanager:/tg-template/rds/credentials/master:SecretString:password}}'
+          OIDC_TOKEN_URI: !Ref OidcTokenUri
+          OIDC_USERINFO_URI: !Ref OidcUserinfoUri
+          OIDC_CLIENT_ID: !Ref OidcClientId
+          OIDC_CLIENT_SECRET: !Sub '{{resolve:secretsmanager:/tg-template/clientsecretid:SecretString:secretid}}'
+          OIDC_REDIRECT_URI: !Ref OidcRedirectUri
+          FRONTEND_URL: !Ref FrontendUrl
+          ENTRAID_TENANT_ID: !Ref EntraidTenantId
+          ENTRAID_CLIENT_ID: !Ref EntraidClientId
+          ENTRAID_CLIENT_SECRET: !Sub '{{resolve:secretsmanager:/tg-template/entraid-client-secret:SecretString:clientSecret}}'
+          ENTRAID_SCOPES: 'openid profile email User.Read'
+          OIDC_AUTHORIZATION_URI: !Ref OidcAuthorizationUri
+          OIDC_SCOPES: !Ref OidcScopes
+          TINY_API_KEY: !Sub '{{resolve:secretsmanager:/tg-template/tiny-api-key:SecretString:api-key}}'
+          DOC_GENERATE_URL: !Ref DocGenerateUrl
+          DOC_COMPARE_URL: !Ref DocCompareUrl
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Lambda Authorizer
+  AuthorizerLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${NamePrefix}-authorizer-${Environment}
+      Runtime: nodejs20.x
+      Handler: src/middleware/auth.authorizer
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref ArtifactsBucket
+        S3Key: artifacts/backend.zip
+      Timeout: 10
+      MemorySize: 256
+      Environment:
+        Variables:
+          OIDC_USERINFO_URI: !Ref OidcUserinfoUri
+          ENTRAID_TENANT_ID: !Ref EntraidTenantId
+          ENTRAID_CLIENT_ID: !Ref EntraidClientId
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+  BffLambdaArn:
+    Value: !GetAtt BffLambda.Arn
+  AuthorizerLambdaArn:
+    Value: !GetAtt AuthorizerLambda.Arn
+  LambdaRoleArn:
+    Value: !GetAtt LambdaExecutionRole.Arn

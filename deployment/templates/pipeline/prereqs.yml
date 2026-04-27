@@ -1,0 +1,187 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >
+  Creates prerequisites for TG Template Webapp: IAM roles for cross-account
+  access and deployments
+
+Parameters:
+  NamePrefix:
+    Description: Prefix added to the name of resources created in this stack
+    Type: String
+    Default: upov-tg-template-webapp
+
+  Environment:
+    Description: Environment type (dev, acc, prd)
+    Type: String
+    AllowedValues: [dev, acc, prd]
+
+  CicdAccount:
+    Description: The id of the cicd account
+    Type: String
+    Default: "173148697964"
+
+  AccountId:
+    Type: String
+    Description: AWS Account ID
+
+Resources:
+  # ==========================================
+  # Artifacts S3 Bucket
+  # ==========================================
+  ArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${NamePrefix}-artifacts-${AWS::Region}-${AccountId}
+      VersioningConfiguration:
+        Status: Enabled
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+      Tags:
+        - Key: environment
+          Value: !Ref Environment
+
+  ArtifactsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactsBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Id: !Sub ${NamePrefix}-artifacts-bucket-policy
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - !Sub arn:aws:iam::${CicdAccount}:root
+                - !Sub arn:aws:iam::${CicdAccount}:role/cicd-upov
+                - !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action:
+              - s3:List*
+              - s3:GetObject
+              - s3:PutObject*
+            Resource:
+              - !GetAtt ArtifactsBucket.Arn
+              - !Sub ${ArtifactsBucket.Arn}/*
+
+  # ==========================================
+  # IAM Roles - Cross Account Access
+  # ==========================================
+  CicdRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${NamePrefix}-cicd-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS:
+                - !Sub arn:aws:iam::${CicdAccount}:root
+                - !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action:
+              - sts:AssumeRole
+      Path: /
+
+  CicdPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${NamePrefix}-cicd-policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - cloudformation:*
+              - s3:*
+              - iam:PassRole
+            Resource: "*"
+      Roles:
+        - !Ref CicdRole
+
+  KmsCicdPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${NamePrefix}-kms-cicd-policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+            Resource: !Sub arn:aws:kms:${AWS::Region}:${CicdAccount}:key/*
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+            Resource: !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*
+      Roles:
+        - !Ref CicdRole
+        - !Ref DeploymentRole
+
+  DeploymentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${NamePrefix}-deployment-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - cloudformation.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+
+  DeploymentPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub ${NamePrefix}-deployment-policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - iam:*
+            Resource:
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/${NamePrefix}*
+              - !Sub arn:aws:iam::${AWS::AccountId}:policy/${NamePrefix}*
+          - Effect: Allow
+            Action:
+              - cloudformation:*
+              - s3:*
+              - lambda:*
+              - apigateway:*
+              - logs:*
+              - iam:PassRole
+              - ec2:*
+              - secretsmanager:GetSecretValue
+              - events:*
+              - ses:*
+            Resource: "*"
+      Roles:
+        - !Ref DeploymentRole
+
+Outputs:
+  ArtifactsBucketName:
+    Description: The name of the artifacts bucket
+    Value: !Ref ArtifactsBucket
+
+  ArtifactsBucketArn:
+    Description: The ARN of the artifacts bucket
+    Value: !GetAtt ArtifactsBucket.Arn
+
+  CicdRoleName:
+    Description: The name of the cross account role
+    Value: !Ref CicdRole
+
+  CicdRoleArn:
+    Description: The ARN of the cross account role
+    Value: !GetAtt CicdRole.Arn
+
+  DeploymentRoleName:
+    Description: The Name of the deployment role
+    Value: !Ref DeploymentRole
+
+  DeploymentRoleArn:
+    Description: The ARN of the deployment role
+    Value: !GetAtt DeploymentRole.Arn
