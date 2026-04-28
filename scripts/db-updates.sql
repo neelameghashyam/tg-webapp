@@ -1,20 +1,33 @@
--- Migration: Add new workflow statuses and isPartialRevision column
--- Run against upovtg database
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Migration: Create TG_EDCComments table
+-- Mirrors TG_IEComments exactly, but scoped to EDC members during ECC phase.
+-- Run against upovtg database.
+-- ─────────────────────────────────────────────────────────────────────────────
 
--- 1. Add missing status codes to Status_TG
-INSERT IGNORE INTO Status_TG (Status_Code, Status_Desc) VALUES
-  ('TWD', 'TWP Discussion Draft'),
-  ('TDD', 'TC-EDC/TC Discussion Draft'),
-  ('ADC', 'Adopted by Correspondence');
+CREATE TABLE IF NOT EXISTS TG_EDCComments (
+  EDCComments_ID       INT            NOT NULL AUTO_INCREMENT,
+  User_ID              INT            NOT NULL,           -- EDC member who wrote it
+  Chapter_Name         VARCHAR(250)   DEFAULT NULL,
+  Section_Name         VARCHAR(250)   DEFAULT NULL,
+  Comments             LONGTEXT       DEFAULT NULL,
+  TG_ID                INT            NOT NULL,
+  CharacteristicOrder  INT            DEFAULT NULL,
+  LastUpdated          TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  Modified_Time        TIMESTAMP      NULL DEFAULT NULL,
+  Created_Time         TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
--- 2. Add isPartialRevision column to TG table
-ALTER TABLE TG ADD COLUMN isPartialRevision VARCHAR(1) NOT NULL DEFAULT 'N' AFTER IsTGStatusOverride;
+  PRIMARY KEY (EDCComments_ID),
 
--- 3. Backfill isPartialRevision for existing TGs with "Rev" in their reference
-UPDATE TG SET isPartialRevision = 'Y' WHERE LOWER(TG_Reference) LIKE '%rev%';
+  CONSTRAINT fk_edcc_tg   FOREIGN KEY (TG_ID)    REFERENCES TG (TG_ID),
+  CONSTRAINT fk_edcc_user FOREIGN KEY (User_ID)   REFERENCES User_Profile (User_ID)
 
--- 4. Verify
-SELECT Status_Code, Status_Desc FROM Status_TG ORDER BY Status_Code;
-SELECT COLUMN_NAME, COLUMN_TYPE, COLUMN_DEFAULT FROM INFORMATION_SCHEMA.COLUMNS
-  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'TG' AND COLUMN_NAME = 'isPartialRevision';
-SELECT COUNT(*) as partialRevisionCount FROM TG WHERE isPartialRevision = 'Y';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COLLATE=utf8mb3_general_ci;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Verify
+-- ─────────────────────────────────────────────────────────────────────────────
+SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_KEY, COLUMN_DEFAULT
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME   = 'TG_EDCComments'
+ORDER BY ORDINAL_POSITION;
